@@ -1,0 +1,33 @@
+# Compiled files
+target/
+bin/
+*.class
+
+# JAR files
+*.jar
+
+# IDE
+.classpath
+.project
+.idea/
+*.iml
+nbproject/
+nb-configuration.xml
+nbactions.xml
+.vscode/
+
+# Logs
+*.log
+
+# Local config
+config_ou_iu.txt
+
+# Distribution (included separately as releases)
+GatewayBACnet/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Backup files
+*_backup*.java

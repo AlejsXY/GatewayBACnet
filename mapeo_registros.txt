@@ -1,0 +1,105 @@
+MAPEO DE REGISTROS MODBUS - Gateway BACnet a Modbus TCP
+========================================================
+
+CONFIGURACION
+-------------
+- Outdoor Units (OU): 7 (OU0 a OU6)
+- Registros por OU: 400
+- Variables propias OU: 10 (indices 0-9)
+- Variables por Indoor: 20 (indices 10-29)
+- Max Indoor por OU: 19
+
+MAPEO DE OBJETOS BACNET
+-----------------------
+Indice  0: Binary Input, instance 1  (BI-1)
+Indice  1: Binary Input, instance 2  (BI-2)
+Indice  2: Analog Input, instance 1  (AI-1)
+Indice  3: Analog Input, instance 2  (AI-2)
+Indice  4: Analog Input, instance 3  (AI-3)
+Indice  5: Analog Input, instance 8  (AI-8)
+Indice  6: Analog Input, instance 9  (AI-9)
+Indice  7: Analog Input, instance 10 (AI-10)
+Indice  8: Analog Value, instance 1  (AV-1)
+Indice  9: Analog Value, instance 6  (AV-6)
+Indice 10: Analog Input, instance 7  (AI-7)
+Indice 11: Binary Value, instance 1  (BV-1)
+Indice 12: Binary Value, instance 4  (BV-4)
+Indice 13: MultiState Value, instance 1 (MSV-1)
+Indice 14: MultiState Value, instance 2 (MSV-2)
+
+
+OU0 - Base: 0
+--------------
+Registros 0-9:       Variables propias OU0
+Registros 10-29:      IU1
+Registros 30-49:      IU2
+Registros 50-69:      IU3
+Registros 70-89:      IU4
+Registros 90-109:     IU5
+Registros 110-129:    IU6
+Registros 130-149:    IU7
+Registros 150-169:    IU8
+
+OU1 - Base: 400
+----------------
+Registros 400-409:   Variables propias OU1
+Registros 410-429:   IU1
+Registros 430-449:   IU2
+Registros 450-469:   IU3
+Registros 470-489:   IU4
+Registros 490-509:   IU5
+Registros 510-529:   IU6
+Registros 530-549:   IU7
+Registros 550-569:   IU8
+Registros 570-589:   IU9
+
+OU2 - Base: 800
+----------------
+Registros 800-809:   Variables propias OU2
+Registros 810-829:   IU1
+Registros 830-849:   IU2
+Registros 850-869:   IU3
+Registros 870-889:   IU4
+Registros 890-909:   IU5
+Registros 910-929:   IU6
+Registros 930-949:   IU7
+Registros 950-969:   IU8
+Registros 970-989:   IU9
+Registros 990-1009:  IU10
+Registros 1010-1029: IU11
+Registros 1030-1049: IU12
+Registros 1050-1069: IU13
+Registros 1070-1089: IU14
+Registros 1090-1109: IU15
+
+OU3 - Base: 1200
+----------------
+Registros 1200-1209: Variables propias OU3
+Registros 1210-1229: IU1
+Registros 1230-1249: IU2
+Registros 1250-1269: IU3
+Registros 1270-1289: IU4
+Registros 1290-1309: IU5
+Registros 1310-1329: IU6
+Registros 1330-1349: IU7
+Registros 1350-1369: IU8
+Registros 1370-1389: IU9
+
+
+DEVICE IDS BACNET CONOCIDOS
+---------------------------
+OU0: deviceId 50100 (propia), 50000-50007 (IU 1-8)
+OU1: deviceId 51112 (propia), 51001-51009 (IU 1-9)
+OU2: deviceId 52120 (propia), 52001-52015 (IU 1-15)
+OU3: deviceId 53124 (propia), 53001-53009 (IU 1-9)
+
+
+FORMULA DE CALCULO
+------------------
+Base OU: numero_ou * 400
+
+Registro para variable propia de OU:
+  direccion = base_ou + indice_variable
+
+Registro para variable de IU:
+  direccion = base_ou + 10 + (numero_iu - 1) * 20 + indice_variable
