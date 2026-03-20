@@ -44,8 +44,8 @@ public class GatewayGUI extends JFrame {
         setLocationRelativeTo(null);
         setMinimumSize(new Dimension(1000, 600));
         
-        initConfiguracion();
         initComponents();
+        initConfiguracion();
         setVisible(true);
     }
     
