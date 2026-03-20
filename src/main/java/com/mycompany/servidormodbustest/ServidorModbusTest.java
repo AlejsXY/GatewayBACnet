@@ -724,55 +724,65 @@ public class ServidorModbusTest {
         });
 
         localDevice.sendGlobalBroadcast(new WhoIsRequest(null, null));
-        System.out.println("Who-Is enviado.");
+        System.out.println("Who-Is broadcast enviado.");
 
-        Thread.sleep(5000);
+        Thread.sleep(10000);
 
-        Map<Integer, GatewayGUI.ConfigOU> mapaDeviceIdOU = new HashMap<>();
-        for (GatewayGUI.ConfigOU config : listaOU) {
-            mapaDeviceIdOU.put(config.idOU, config);
+        System.out.println("I-Am responses recibidas: " + dispositivos.size());
+        for (RemoteDevice d : dispositivos) {
+            System.out.println("  - Device ID: " + d.getInstanceNumber() + " en " + d.getAddress());
         }
 
-        int ouIndex = 0;
-        for (GatewayGUI.ConfigOU config : listaOU) {
-            int base = ouIndex * 400;
+        System.out.println("\n=== Mapeando dispositivos descubiertos ===");
+        for (RemoteDevice dispositivo : dispositivos) {
+            int deviceId = dispositivo.getInstanceNumber();
+            int[] ouIu = obtenerOuIuDesdeDeviceId(deviceId);
             
-            int deviceIdPropio = config.idOU;
-            Optional<RemoteDevice> dispositivoPropio = dispositivos.stream()
-                .filter(d -> d.getInstanceNumber() == deviceIdPropio)
-                .findFirst();
+            if (ouIu == null) {
+                System.out.println("Dispositivo " + deviceId + " no reconocido, se ignora.");
+                continue;
+            }
             
-            if (dispositivoPropio.isPresent()) {
-                System.out.println("Cacheando OU-" + config.idOU + " (deviceId " + deviceIdPropio + ")");
-                cachearDispositivo(localDevice, dispositivoPropio.get(), base, listaVars);
+            int ou = ouIu[0];
+            int iu = iu = ouIu[1];
+            
+            int base;
+            if (iu == 0) {
+                base = (ou - 1) * 400;
             } else {
-                System.out.println("OU-" + config.idOU + " (deviceId " + deviceIdPropio + ") no encontrada");
+                base = (ou - 1) * 400 + 10 + (iu - 1) * 20;
             }
             
-            int cantidadIU = config.idIUFin - config.idIUInicio + 1;
-            for (int idxIU = 0; idxIU < cantidadIU; idxIU++) {
-                int deviceIdIU = config.idIUInicio + idxIU;
-                int baseIU = base + 10 + idxIU * 20;
-                
-                Optional<RemoteDevice> dispositivoIU = dispositivos.stream()
-                    .filter(d -> d.getInstanceNumber() == deviceIdIU)
-                    .findFirst();
-                
-                if (dispositivoIU.isPresent()) {
-                    System.out.println("Cacheando IU (deviceId " + deviceIdIU + ")");
-                    cachearDispositivo(localDevice, dispositivoIU.get(), baseIU, listaVars);
-                } else {
-                    System.out.println("IU (deviceId " + deviceIdIU + ") no encontrada");
-                }
-            }
-            ouIndex++;
+            System.out.println("Dispositivo " + deviceId + " -> OU" + ou + ", IU" + iu + ", base=" + base);
+            cachearDispositivo(localDevice, dispositivo, base, listaVars);
         }
 
-        System.out.println("Iniciando lectura continua...");
+        System.out.println("\n=== Iniciando lectura continua ===");
         while (true) {
             Thread.sleep(10000);
-            leerTodosLosDispositivosGUI(localDevice, dispositivos, listaVars, listaOU);
+            leerTodosLosDispositivosGUI(localDevice, dispositivos, listaVars);
         }
+    }
+
+    private static int[] obtenerOuIuDesdeDeviceId(int deviceId) {
+        if (deviceId >= 50000 && deviceId <= 50007) {
+            return new int[]{1, deviceId - 50000 + 1};
+        } else if (deviceId >= 51001 && deviceId <= 51009) {
+            return new int[]{2, deviceId - 51000};
+        } else if (deviceId >= 52001 && deviceId <= 52015) {
+            return new int[]{3, deviceId - 52000};
+        } else if (deviceId >= 53001 && deviceId <= 53009) {
+            return new int[]{4, deviceId - 53000};
+        } else if (deviceId == 50100) {
+            return new int[]{1, 0};
+        } else if (deviceId == 51112) {
+            return new int[]{2, 0};
+        } else if (deviceId == 52120) {
+            return new int[]{3, 0};
+        } else if (deviceId == 53124) {
+            return new int[]{4, 0};
+        }
+        return null;
     }
 
     private static void mapearDispositivo(LocalDevice localDevice, RemoteDevice dispositivo, int base, List<GatewayGUI.VariableConfig> listaVars) {
@@ -908,47 +918,43 @@ public class ServidorModbusTest {
     }
 
     private static void leerTodosLosDispositivosGUI(LocalDevice localDevice, List<RemoteDevice> dispositivos, 
-            List<GatewayGUI.VariableConfig> listaVars, List<GatewayGUI.ConfigOU> listaOU) {
-        System.out.println("\n=== Ciclo de lectura BACnet ===");
-        System.out.println("Dispositivos disponibles: " + dispositivos.size());
+            List<GatewayGUI.VariableConfig> listaVars) {
         
-        for (RemoteDevice dispositivo : dispositivos) {
-            System.out.println("Procesando dispositivo: " + dispositivo.getInstanceNumber());
+        for (RemoteDevice dispositivo : cacheDeviceToBase.keySet()) {
+            Integer base = cacheDeviceToBase.get(dispositivo);
+            List<ObjectIdentifier> oids = cacheDeviceToOids.get(dispositivo);
+            if (base == null || oids == null || oids.isEmpty()) continue;
+            
             try {
-                Encodable encodable = RequestUtils.readProperty(localDevice, dispositivo, dispositivo.getObjectIdentifier(), PropertyIdentifier.objectList, null);
-                
-                if (encodable instanceof com.serotonin.bacnet4j.type.constructed.SequenceOf) {
-                    com.serotonin.bacnet4j.type.constructed.SequenceOf<ObjectIdentifier> objectList = 
-                        (com.serotonin.bacnet4j.type.constructed.SequenceOf<ObjectIdentifier>) encodable;
-
-                    System.out.println("  ObjectList tiene " + objectList.getCount() + " objetos");
-                    
-                    int ouIndex = 0;
-                    for (GatewayGUI.ConfigOU config : listaOU) {
-                        int base = ouIndex * 400;
-                        
-                        if (dispositivo.getInstanceNumber() == config.idOU) {
-                            System.out.println("  Dispositivo es OU-" + config.idOU + " con base " + base);
-                            leerObjetosDelista(localDevice, dispositivo, objectList, base, listaVars);
-                        }
-                        
-                        int cantidadIU = config.idIUFin - config.idIUInicio + 1;
-                        for (int idxIU = 0; idxIU < cantidadIU; idxIU++) {
-                            int deviceIdIU = config.idIUInicio + idxIU;
-                            int baseIU = base + 10 + idxIU * 20;
-                            if (dispositivo.getInstanceNumber() == deviceIdIU) {
-                                System.out.println("  Dispositivo es IU-" + deviceIdIU + " de OU con base " + baseIU);
-                                leerObjetosDelista(localDevice, dispositivo, objectList, baseIU, listaVars);
+                for (ObjectIdentifier oid : oids) {
+                    for (GatewayGUI.VariableConfig var : listaVars) {
+                        ObjectType tipo = tipoBacnetDesdeString(var.tipo);
+                        if (tipo != null && oid.getObjectType().equals(tipo) && oid.getInstanceNumber() == var.instance) {
+                            int direccion = base + var.index;
+                            try {
+                                Encodable valor = RequestUtils.readProperty(localDevice, dispositivo, oid, PropertyIdentifier.presentValue, null);
+                                int valorInt = 0;
+                                if (valor instanceof Real) {
+                                    valorInt = Math.round(((Real) valor).floatValue());
+                                } else if (valor instanceof Boolean) {
+                                    valorInt = ((Boolean) valor).booleanValue() ? 1 : 0;
+                                } else if (valor instanceof BinaryPV) {
+                                    valorInt = valor.equals(BinaryPV.active) ? 1 : 0;
+                                } else if (valor instanceof UnsignedInteger) {
+                                    valorInt = ((UnsignedInteger) valor).intValue();
+                                }
+                                actualizarDesdeBACnet(direccion, valorInt);
+                            } catch (BACnetException e) {
+                                System.err.println("Error leyendo " + oid + ": " + e.getMessage());
                             }
+                            break;
                         }
-                        ouIndex++;
                     }
                 }
             } catch (Exception e) {
-                System.err.println("Error leyendo dispositivo " + dispositivo.getInstanceNumber() + ": " + e.getMessage());
+                System.err.println("Error en lectura dispositivo " + dispositivo.getInstanceNumber() + ": " + e.getMessage());
             }
         }
-        System.out.println("=== Fin ciclo de lectura ===\n");
     }
 
     private static void leerObjetosDelista(LocalDevice localDevice, RemoteDevice dispositivo, 
