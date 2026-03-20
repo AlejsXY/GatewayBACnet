@@ -511,21 +511,24 @@ public class GatewayGUI extends JFrame {
                 sb.append("------------------------------------------------\n");
                 
                 sb.append("  Vars Propias OU\n");
+                sb.append(String.format("  %-5s %-4s %7s  %s\n", "Reg", "Idx", "Valor", "Variable"));
+                sb.append("  ------------------------------------------------\n");
                 for (int i = 0; i < 10; i++) {
                     int d = base + i;
                     int valor = valores.containsKey(d) ? valores.get(d) : 0;
-                    sb.append(String.format("  %-3d [%5d] %s\n", i, valor, ServidorModbusTest.getNombreVariable(i)));
+                    sb.append(String.format("  %-5d %-4d [%5d]  %s\n", d, i, valor, ServidorModbusTest.getNombreVariable(i)));
                 }
                 
                 int cantidadIU = config.idIUFin - config.idIUInicio + 1;
                 for (int idxIU = 0; idxIU < cantidadIU; idxIU++) {
                     int idIU = config.idIUInicio + idxIU;
                     sb.append("\n  IU-").append(idxIU).append(" ID: ").append(idIU).append("\n");
+                    sb.append(String.format("  %-5s %-4s %7s  %s\n", "Reg", "Idx", "Valor", "Variable"));
                     sb.append("  ------------------------------------------------\n");
                     for (int i = 0; i < 20; i++) {
                         int d = base + 10 + idxIU * 20 + i;
                         int valor = valores.containsKey(d) ? valores.get(d) : 0;
-                        sb.append(String.format("  %-3d [%5d] %s\n", i, valor, ServidorModbusTest.getNombreVariable(i)));
+                        sb.append(String.format("  %-5d %-4d [%5d]  %s\n", d, i, valor, ServidorModbusTest.getNombreVariable(i)));
                     }
                 }
             }

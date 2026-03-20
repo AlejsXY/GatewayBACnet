@@ -539,15 +539,17 @@ public class ServidorModbusTest {
     }
 
     // ==================== API PARA BACNET ====================
-        public static void actualizarDesdeBACnet(int direccion, int nuevoValor) {
+    public static void actualizarDesdeBACnet(int direccion, int nuevoValor) {
+        synchronized (registros) {
             RegistroControlado r = registros.get(direccion);
             if (r != null) {
-                r.valor = nuevoValor; // Actualiza siempre (la fuente es BACnet)
-                System.out.println("  [BACnet] Registro " + direccion + " actualizado a " + nuevoValor);
+                r.valor = nuevoValor;
+                System.out.println("  [BACnet] Registro " + direccion + " = " + nuevoValor);
             } else {
-                System.err.println("  [BACnet] Dirección " + direccion + " no existe");
+                System.err.println("  [BACnet] Direccion " + direccion + " no existe");
             }
         }
+    }
 
     // ==================== API PARA GUI ====================
     public static Map<Integer, Integer> obtenerValoresRegistros() {
@@ -907,7 +909,11 @@ public class ServidorModbusTest {
 
     private static void leerTodosLosDispositivosGUI(LocalDevice localDevice, List<RemoteDevice> dispositivos, 
             List<GatewayGUI.VariableConfig> listaVars, List<GatewayGUI.ConfigOU> listaOU) {
+        System.out.println("\n=== Ciclo de lectura BACnet ===");
+        System.out.println("Dispositivos disponibles: " + dispositivos.size());
+        
         for (RemoteDevice dispositivo : dispositivos) {
+            System.out.println("Procesando dispositivo: " + dispositivo.getInstanceNumber());
             try {
                 Encodable encodable = RequestUtils.readProperty(localDevice, dispositivo, dispositivo.getObjectIdentifier(), PropertyIdentifier.objectList, null);
                 
@@ -915,11 +921,14 @@ public class ServidorModbusTest {
                     com.serotonin.bacnet4j.type.constructed.SequenceOf<ObjectIdentifier> objectList = 
                         (com.serotonin.bacnet4j.type.constructed.SequenceOf<ObjectIdentifier>) encodable;
 
+                    System.out.println("  ObjectList tiene " + objectList.getCount() + " objetos");
+                    
                     int ouIndex = 0;
                     for (GatewayGUI.ConfigOU config : listaOU) {
                         int base = ouIndex * 400;
                         
                         if (dispositivo.getInstanceNumber() == config.idOU) {
+                            System.out.println("  Dispositivo es OU-" + config.idOU + " con base " + base);
                             leerObjetosDelista(localDevice, dispositivo, objectList, base, listaVars);
                         }
                         
@@ -928,6 +937,7 @@ public class ServidorModbusTest {
                             int deviceIdIU = config.idIUInicio + idxIU;
                             int baseIU = base + 10 + idxIU * 20;
                             if (dispositivo.getInstanceNumber() == deviceIdIU) {
+                                System.out.println("  Dispositivo es IU-" + deviceIdIU + " de OU con base " + baseIU);
                                 leerObjetosDelista(localDevice, dispositivo, objectList, baseIU, listaVars);
                             }
                         }
@@ -938,11 +948,15 @@ public class ServidorModbusTest {
                 System.err.println("Error leyendo dispositivo " + dispositivo.getInstanceNumber() + ": " + e.getMessage());
             }
         }
+        System.out.println("=== Fin ciclo de lectura ===\n");
     }
 
     private static void leerObjetosDelista(LocalDevice localDevice, RemoteDevice dispositivo, 
             com.serotonin.bacnet4j.type.constructed.SequenceOf<ObjectIdentifier> objectList, 
             int base, List<GatewayGUI.VariableConfig> listaVars) {
+        
+        System.out.println("  Leyendo objetos del dispositivo " + dispositivo.getInstanceNumber() + " (base=" + base + ")");
+        int leidos = 0;
         
         for (ObjectIdentifier oid : objectList) {
             for (GatewayGUI.VariableConfig var : listaVars) {
@@ -962,13 +976,15 @@ public class ServidorModbusTest {
                             valorInt = ((UnsignedInteger) valor).intValue();
                         }
                         actualizarDesdeBACnet(direccion, valorInt);
+                        leidos++;
                     } catch (Exception e) {
-                        // Silencioso
+                        System.err.println("    Error leyendo " + oid + ": " + e.getMessage());
                     }
                     break;
                 }
             }
         }
+        System.out.println("  Leidos " + leidos + " valores del dispositivo " + dispositivo.getInstanceNumber());
     }
 
     // ==================== MAIN ====================
