@@ -766,10 +766,10 @@ public class ServidorModbusTest {
             ouIndex++;
         }
 
-        System.out.println("Iniciando lectura continua con ReadPropertyMultiple...");
+        System.out.println("Iniciando lectura continua...");
         while (true) {
             Thread.sleep(10000);
-            leerTodosLosDispositivosRPM(localDevice, listaVars);
+            leerTodosLosDispositivosGUI(localDevice, dispositivos, listaVars, listaOU);
         }
     }
 
