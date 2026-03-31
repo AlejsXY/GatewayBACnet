@@ -1,0 +1,6 @@
+# Configuración de Bloques OU-IU
+# Formato: idOU,idIUInicio,idIUFin
+50100,50000,50007
+51112,51001,51009
+52120,52001,52015
+53124,53001,53009

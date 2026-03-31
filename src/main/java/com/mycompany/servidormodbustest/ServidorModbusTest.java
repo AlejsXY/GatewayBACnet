@@ -23,12 +23,15 @@ import com.serotonin.bacnet4j.type.enumerated.PropertyIdentifier;
 import com.serotonin.bacnet4j.type.primitive.ObjectIdentifier;
 import com.serotonin.bacnet4j.type.primitive.Real;
 import com.serotonin.bacnet4j.exception.BACnetException;
-import com.serotonin.bacnet4j.type.primitive.OctetString;
 import com.serotonin.bacnet4j.event.DeviceEventListener;
 import com.serotonin.bacnet4j.type.primitive.UnsignedInteger;
 import com.serotonin.bacnet4j.type.primitive.Boolean;
+import java.net.Inet4Address;
 
 import java.net.InetAddress;
+import java.net.NetworkInterface;
+import java.net.InterfaceAddress;
+import java.net.SocketException;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
@@ -38,101 +41,19 @@ import javax.swing.SwingUtilities;
 
 public class ServidorModbusTest {
 
-    // ==================== CONFIGURACIÓN GENERAL ====================
-    private static final int PUERTO_MODBUS = 503;
+    // ==================== CONSTANTES GENERALES ====================
     private static final int UNIT_ID = 1;
     private static final int INTERVALO_HEARTBEAT = 5000;
-    private static final int PUERTO_BACNET_CLIENTE = 47808;
-    private static final int ID_DISPOSITIVO_BACNET = 12345;
-    private static final int TIEMPO_ESPERA_DESCUBRIMIENTO = 10000;
-    private static final int INTERVALO_LECTURA_BACNET = 10000;
-
-    // ==================== CONFIGURACIÓN MODBUS ====================
-    private static final int NUM_OUTDOOR = 7;                     // Número de Outdoor Units
-    private static final int REGISTROS_POR_OU = 400;              // Cada OU ocupa 400 registros (10 propias + hasta 19 IU * 20)
-    private static final int VARS_PROPIAS_OU = 10;                // Registros propios de la OU
-    private static final int VARS_POR_INDOOR = 20;                // Registros por Indoor Unit
-    private static final int MAX_INDOOR_POR_OU = (REGISTROS_POR_OU - VARS_PROPIAS_OU) / VARS_POR_INDOOR; // = 19
-
-    // Permisos (false = RW, true = RO)
-    private static final boolean[] PERMISOS_PROPIAS_OU = new boolean[VARS_PROPIAS_OU];
-    private static final boolean[] PERMISOS_INDOOR = new boolean[VARS_POR_INDOOR];
-
-    static {
-        Arrays.fill(PERMISOS_PROPIAS_OU, false);
-        Arrays.fill(PERMISOS_INDOOR, false);
-        // Índices de solo lectura (true)
-        PERMISOS_INDOOR[0] = true;  // binaryInput:1
-        PERMISOS_INDOOR[1] = true;  // binaryInput:2
-        PERMISOS_INDOOR[2] = true;  // analogInput:1
-        PERMISOS_INDOOR[3] = true;  // analogInput:2
-        PERMISOS_INDOOR[4] = true;  // analogInput:3
-        PERMISOS_INDOOR[5] = true;  // analogInput:8
-        PERMISOS_INDOOR[6] = true;  // analogInput:9
-        PERMISOS_INDOOR[7] = true;  // analogInput:10
-        PERMISOS_INDOOR[10] = true; // analogInput:7
-        // Los índices 8,9,11,12,13,14 son RW (false por defecto)
-    }
-
-    // ==================== MAPEO DE OBJETOS BACNET ====================
-    private static final String[] NOMBRES_VARIABLES = {
-        "BI-1", "BI-2", "AI-1", "AI-2", "AI-3", "AI-8", "AI-9", "AI-10",
-        "AV-1", "AV-6", "AI-7", "BV-1", "BV-4", "MSV-1", "MSV-2",
-        "Var15", "Var16", "Var17", "Var18", "Var19"
-    };
-    
-    private static final List<BacnetObjectMapping> MAPEO_OBJETOS = Arrays.asList(
-        new BacnetObjectMapping(ObjectType.binaryInput, 1, 0),
-        new BacnetObjectMapping(ObjectType.binaryInput, 2, 1),
-        new BacnetObjectMapping(ObjectType.analogInput, 1, 2),
-        new BacnetObjectMapping(ObjectType.analogInput, 2, 3),
-        new BacnetObjectMapping(ObjectType.analogInput, 3, 4),
-        new BacnetObjectMapping(ObjectType.analogInput, 8, 5),
-        new BacnetObjectMapping(ObjectType.analogInput, 9, 6),
-        new BacnetObjectMapping(ObjectType.analogInput, 10, 7),
-        new BacnetObjectMapping(ObjectType.analogValue, 1, 8),
-        new BacnetObjectMapping(ObjectType.analogValue, 6, 9),
-        new BacnetObjectMapping(ObjectType.analogInput, 7, 10),
-        new BacnetObjectMapping(ObjectType.binaryValue, 1, 11),
-        new BacnetObjectMapping(ObjectType.binaryValue, 4, 12),
-        new BacnetObjectMapping(ObjectType.multiStateValue, 1, 13),
-        new BacnetObjectMapping(ObjectType.multiStateValue, 2, 14)
-    );
-
-    static class BacnetObjectMapping {
-        ObjectType type;
-        int instance;
-        int variableIndex;
-
-        BacnetObjectMapping(ObjectType type, int instance, int variableIndex) {
-            this.type = type;
-            this.instance = instance;
-            this.variableIndex = variableIndex;
-        }
-    }
-    
-    public static String getNombreVariable(int index) {
-        if (index >= 0 && index < NOMBRES_VARIABLES.length) {
-            return NOMBRES_VARIABLES[index];
-        }
-        return "Var" + index;
-    }
-    
-    public static List<GatewayGUI.ConfigOU> getConfiguracionDefault() {
-        List<GatewayGUI.ConfigOU> defaults = new ArrayList<>();
-        defaults.add(new GatewayGUI.ConfigOU(50100, 50000, 50007));
-        defaults.add(new GatewayGUI.ConfigOU(51112, 51001, 51009));
-        defaults.add(new GatewayGUI.ConfigOU(52120, 52001, 52015));
-        defaults.add(new GatewayGUI.ConfigOU(53124, 53001, 53009));
-        return defaults;
-    }
+    // Las constantes de tiempos ya no son fijas, se reciben como parámetros
+    // private static final int TIEMPO_ESPERA_DESCUBRIMIENTO = 2000;
+    // private static final int INTERVALO_LECTURA_BACNET = 2000;
 
     // ==================== REGISTRO CONTROLADO ====================
     static class RegistroControlado implements Register {
         private final int direccion;
         private final String nombre;
         private final boolean soloLectura;
-        private int valor;
+        private volatile int valor;
 
         public RegistroControlado(int direccion, String nombre, boolean soloLectura, int valorInicial) {
             this.direccion = direccion;
@@ -151,10 +72,14 @@ public class ServidorModbusTest {
                 System.err.println("  [Modbus] Intento de escritura en solo lectura: " + direccion + " (" + nombre + ")");
                 return;
             }
-            int anterior = this.valor;
-            this.valor = v;
-            System.out.println("  [Modbus] Escritura en " + direccion + " (" + nombre + "): " + anterior + " → " + v);
-            BACnetClienteIntegrado.escribirEnDispositivo(direccion, v);
+            boolean success = BACnetClienteIntegrado.escribirEnDispositivo(direccion, v);
+            if(success){
+                int anterior = this.valor;
+                this.valor = v;
+                System.out.println("  [Modbus] Escritura en " + direccion + " (" + nombre + "): " + anterior + " → " + v);
+            }else{
+                System.err.println("  [Modbus] Escritura en " + direccion + " (" + nombre + ") falló en BACnet, valor no actualizado.");
+            }
         }
 
         @Override public byte[] toBytes() {
@@ -216,13 +141,17 @@ public class ServidorModbusTest {
 
     // ==================== CLIENTE BACNET INTEGRADO ====================
     static class BACnetClienteIntegrado {
-        private static LocalDevice localDevice;
+        private static volatile LocalDevice localDevice;
         private static final List<RemoteDevice> dispositivos = new CopyOnWriteArrayList<>();
-        private static Thread monitorThread;
-        private static volatile boolean running = true;
-        private static int intervaloMs = INTERVALO_LECTURA_BACNET;
 
-        private static final Map<RemoteDevice, Map<ObjectIdentifier, Integer>> mapaObjetoADireccion = new ConcurrentHashMap<>();
+        // Mapas de caché
+        private static final Map<RemoteDevice, Integer> cacheDeviceToBase = new ConcurrentHashMap<>();
+        private static final Map<RemoteDevice, List<ObjectIdentifier>> cacheDeviceToOids = new ConcurrentHashMap<>();
+        
+        // Ahora guardamos la dirección directamente con cada OID por dispositivo
+        private static final Map<RemoteDevice, List<Integer>> cacheDeviceToAddresses = new ConcurrentHashMap<>();
+        
+        // Mapa de dirección Modbus a objeto (para escritura)
         private static final Map<Integer, MapeoEscritura> mapaDireccionAObjeto = new ConcurrentHashMap<>();
 
         static class MapeoEscritura {
@@ -231,185 +160,62 @@ public class ServidorModbusTest {
             MapeoEscritura(RemoteDevice d, ObjectIdentifier o) { dispositivo = d; oid = o; }
         }
 
-        // Método para obtener OU e IU a partir del deviceId según la convención
-        private static int[] obtenerOuIuDesdeDeviceId(int deviceId) {
-            if (deviceId >= 50000 && deviceId <= 50007) {
-                return new int[]{1, deviceId - 50000 + 1}; // OU1, IU 1..8
-            } else if (deviceId >= 51001 && deviceId <= 51009) {
-                return new int[]{2, deviceId - 51000}; // 51001->1, ..., 51009->9
-            } else if (deviceId >= 52001 && deviceId <= 52015) {
-                return new int[]{3, deviceId - 52000}; // 52001->1, ..., 52015->15
-            } else if (deviceId >= 53001 && deviceId <= 53009) {
-                return new int[]{4, deviceId - 53000}; // 53001->1, ..., 53009->9
-            } else if (deviceId == 50100) {
-                return new int[]{1, 0}; // OU1 propia
-            } else if (deviceId == 51112) {
-                return new int[]{2, 0}; // OU2 propia
-            } else if (deviceId == 52120) {
-                return new int[]{3, 0}; // OU3 propia
-            } else if (deviceId == 53124) {
-                return new int[]{4, 0}; // OU4 propia
-            }
-            return null;
+        static void reiniciarCaches() {
+            cacheDeviceToBase.clear();
+            cacheDeviceToOids.clear();
+            cacheDeviceToAddresses.clear();
+            mapaDireccionAObjeto.clear();
+            dispositivos.clear();
+            System.out.println("  [BACnet] Cachés estáticas reiniciadas.");
         }
 
-        public static void iniciar() throws Exception {
-        String ipLocal = obtenerIpLocalStatic();
-            String broadcast = ipLocal.substring(0, ipLocal.lastIndexOf('.')) + ".255";
+        private static void cachearDispositivo(LocalDevice localDevice, RemoteDevice dispositivo, int base, List<BacnetObjectMapping> objetos) {
+            try {
+                DiscoveryUtils.getExtendedDeviceInformation(localDevice, dispositivo);
+                Encodable encodable = RequestUtils.readProperty(localDevice, dispositivo, dispositivo.getObjectIdentifier(), PropertyIdentifier.objectList, null);
+                
+                if (encodable instanceof com.serotonin.bacnet4j.type.constructed.SequenceOf) {
+                    com.serotonin.bacnet4j.type.constructed.SequenceOf<ObjectIdentifier> objectList = 
+                        (com.serotonin.bacnet4j.type.constructed.SequenceOf<ObjectIdentifier>) encodable;
 
-            System.out.println("IP local detectada: " + ipLocal);
-            System.out.println("Broadcast: " + broadcast);
-
-            IpNetwork network = new IpNetworkBuilder()
-                    .withLocalBindAddress(ipLocal)
-                    .withBroadcast(broadcast, 0)
-                    .withPort(PUERTO_BACNET_CLIENTE)
-                    .build();
-
-            DefaultTransport transport = new DefaultTransport(network);
-            localDevice = new LocalDevice(ID_DISPOSITIVO_BACNET, transport);
-            localDevice.initialize();
-
-            localDevice.getEventHandler().addListener(new DeviceEventListener() {
-                @Override
-                public void iAmReceived(RemoteDevice rd) {
-                    System.out.println("  [BACnet] I-Am recibido de dispositivo " + rd.getInstanceNumber() + " desde " + rd.getAddress());
-                    if (!dispositivos.contains(rd)) {
-                        dispositivos.add(rd);
-                        System.out.println("  [BACnet] Dispositivo añadido: " + rd.getInstanceNumber());
+                    cacheDeviceToBase.put(dispositivo, base);
+                    
+                    System.out.println("  [DEBUG] Objetos en dispositivo " + dispositivo.getInstanceNumber() + ":");
+                    for (ObjectIdentifier oid : objectList) {
+                        System.out.println("    - " + oid.getObjectType() + " " + oid.getInstanceNumber());
                     }
-                }
-
-                @Override public void iHaveReceived(RemoteDevice rd, RemoteObject ro) { }
-                @Override public void covNotificationReceived(com.serotonin.bacnet4j.type.primitive.UnsignedInteger subscriberProcessId, ObjectIdentifier initiatingDevice, ObjectIdentifier monitoredObject, com.serotonin.bacnet4j.type.primitive.UnsignedInteger timeRemaining, com.serotonin.bacnet4j.type.constructed.SequenceOf<PropertyValue> listOfValues) { }
-                @Override public void eventNotificationReceived(com.serotonin.bacnet4j.type.primitive.UnsignedInteger processIdentifier, ObjectIdentifier initiatingDevice, ObjectIdentifier eventObjectIdentifier, com.serotonin.bacnet4j.type.constructed.TimeStamp timeStamp, com.serotonin.bacnet4j.type.primitive.UnsignedInteger notificationClass, com.serotonin.bacnet4j.type.primitive.UnsignedInteger priority, com.serotonin.bacnet4j.type.enumerated.EventType eventType, com.serotonin.bacnet4j.type.primitive.CharacterString messageText, com.serotonin.bacnet4j.type.enumerated.NotifyType notifyType, com.serotonin.bacnet4j.type.primitive.Boolean ackRequired, com.serotonin.bacnet4j.type.enumerated.EventState fromState, com.serotonin.bacnet4j.type.enumerated.EventState toState, com.serotonin.bacnet4j.type.notificationParameters.NotificationParameters notificationParameters) { }
-                @Override public void textMessageReceived(ObjectIdentifier textMessageSourceDevice, com.serotonin.bacnet4j.type.constructed.Choice messageClass, com.serotonin.bacnet4j.type.enumerated.MessagePriority messagePriority, com.serotonin.bacnet4j.type.primitive.CharacterString message) { }
-                @Override public void synchronizeTime(com.serotonin.bacnet4j.type.constructed.Address from, com.serotonin.bacnet4j.type.constructed.DateTime dateTime, boolean utc) { }
-                @Override public void requestReceived(com.serotonin.bacnet4j.type.constructed.Address from, com.serotonin.bacnet4j.service.Service service) { }
-                @Override public boolean allowPropertyWrite(com.serotonin.bacnet4j.type.constructed.Address address, com.serotonin.bacnet4j.obj.BACnetObject obj, PropertyValue pv) { return true; }
-                @Override public void propertyWritten(com.serotonin.bacnet4j.type.constructed.Address address, com.serotonin.bacnet4j.obj.BACnetObject obj, PropertyValue pv) { }
-                @Override public void listenerException(Throwable e) { }
-            });
-
-            System.out.println("Cliente BACnet inicializado.");
-
-            localDevice.sendGlobalBroadcast(new WhoIsRequest(null, null));
-            System.out.println("Who-Is broadcast enviado.");
-
-            System.out.println("Esperando " + TIEMPO_ESPERA_DESCUBRIMIENTO/1000 + " segundos para recibir I-Am...");
-            Thread.sleep(TIEMPO_ESPERA_DESCUBRIMIENTO);
-
-            for (RemoteDevice dispositivo : dispositivos) {
-                int deviceId = dispositivo.getInstanceNumber();
-                int[] ouIu = obtenerOuIuDesdeDeviceId(deviceId);
-                if (ouIu == null) {
-                    System.out.println("Dispositivo " + deviceId + " no está en el mapeo, se ignora.");
-                    continue;
-                }
-                int ou = ouIu[0];
-                int iu = ouIu[1];
-
-                if (ou < 1 || ou > NUM_OUTDOOR) {
-                    System.err.println("OU " + ou + " fuera de rango para dispositivo " + deviceId);
-                    continue;
-                }
-                if (iu < 0 || iu > MAX_INDOOR_POR_OU) {
-                    System.err.println("IU " + iu + " fuera de rango (máx " + MAX_INDOOR_POR_OU + ") para dispositivo " + deviceId + ". Se ignora.");
-                    continue;
-                }
-
-                try {
-                    DiscoveryUtils.getExtendedDeviceInformation(localDevice, dispositivo);
-                    Encodable encodable = RequestUtils.readProperty(localDevice, dispositivo, dispositivo.getObjectIdentifier(), PropertyIdentifier.objectList, null);
-                    if (encodable instanceof com.serotonin.bacnet4j.type.constructed.SequenceOf) {
-                        com.serotonin.bacnet4j.type.constructed.SequenceOf<ObjectIdentifier> objectList = (com.serotonin.bacnet4j.type.constructed.SequenceOf<ObjectIdentifier>) encodable;
-
-                        int base;
-                        if (iu == 0) {
-                            base = (ou - 1) * REGISTROS_POR_OU;
-                        } else {
-                            base = (ou - 1) * REGISTROS_POR_OU + VARS_PROPIAS_OU + (iu - 1) * VARS_POR_INDOOR;
-                        }
-                        System.out.println("Dispositivo " + deviceId + " (OU" + ou + ", IU" + iu + ") base = " + base);
-
-                        Map<ObjectIdentifier, Integer> mapaDispositivo = new ConcurrentHashMap<>();
-                        for (ObjectIdentifier oid : objectList) {
-                            for (BacnetObjectMapping mapping : MAPEO_OBJETOS) {
-                                if (oid.getObjectType().equals(mapping.type) && oid.getInstanceNumber() == mapping.instance) {
-                                    int direccion = base + mapping.variableIndex;
-                                    mapaDispositivo.put(oid, direccion);
-                                    System.out.println("  [MAPEO] " + oid + " → dirección " + direccion + " (base " + base + " + idx " + mapping.variableIndex + ")");
-                                    break;
-                                }
+                    System.out.println("  [DEBUG] Buscando variables: " + objetos);
+                    
+                    List<ObjectIdentifier> oidsPrevios = cacheDeviceToOids.getOrDefault(dispositivo, new ArrayList<>());
+                    List<Integer> dirPrevias = cacheDeviceToAddresses.getOrDefault(dispositivo, new ArrayList<>());
+                    List<ObjectIdentifier> oidsRelevantes = new ArrayList<>(oidsPrevios);
+                    List<Integer> direccionesRelevantes = new ArrayList<>(dirPrevias);
+                    for (ObjectIdentifier oid : objectList) {
+                        for (BacnetObjectMapping m : objetos) {
+                            if (oid.getObjectType().equals(m.type) && oid.getInstanceNumber() == m.instance) {
+                                int direccion = base + m.variableIndex;
+                                System.out.println("  [CACHE] " + oid + " → reg " + direccion + " (dispositivo: " + dispositivo.getInstanceNumber() + ")");
+                                oidsRelevantes.add(oid);
+                                direccionesRelevantes.add(direccion);
+                                mapaDireccionAObjeto.put(direccion, new MapeoEscritura(dispositivo, oid));
+                                break;
                             }
                         }
-                        if (!mapaDispositivo.isEmpty()) {
-                            mapaObjetoADireccion.put(dispositivo, mapaDispositivo);
-                            for (Map.Entry<ObjectIdentifier, Integer> entry : mapaDispositivo.entrySet()) {
-                                mapaDireccionAObjeto.put(entry.getValue(), new MapeoEscritura(dispositivo, entry.getKey()));
-                            }
-                            System.out.println("Dispositivo " + deviceId + " (OU" + ou + (iu==0 ? " propia" : " IU"+iu) + ") mapeado a base " + base + " con " + mapaDispositivo.size() + " objetos");
-                        } else {
-                            System.out.println("Dispositivo " + deviceId + " no tiene objetos de interés");
-                        }
                     }
-                } catch (Exception e) {
-                    System.err.println("Error obteniendo información del dispositivo " + deviceId + ": " + e.getMessage());
+                    cacheDeviceToOids.put(dispositivo, oidsRelevantes);
+                    cacheDeviceToAddresses.put(dispositivo, direccionesRelevantes);
+                    System.out.println("  [CACHE] Dispositivo " + dispositivo.getInstanceNumber() + " cacheado con " + oidsRelevantes.size() + " objetos relevantes");
                 }
-            }
-
-            System.out.println("Mapa de objetos BACnet construido con " + mapaDireccionAObjeto.size() + " entradas.");
-
-            monitorThread = new Thread(() -> {
-                while (running) {
-                    try {
-                        Thread.sleep(intervaloMs);
-                        leerTodosLosDispositivos();
-                    } catch (InterruptedException e) {
-                        break;
-                    }
-                }
-            });
-            monitorThread.setDaemon(true);
-            monitorThread.start();
-        }
-
-        private static void leerTodosLosDispositivos() {
-            for (RemoteDevice dispositivo : dispositivos) {
-                Map<ObjectIdentifier, Integer> mapaDispositivo = mapaObjetoADireccion.get(dispositivo);
-                if (mapaDispositivo == null) continue;
-                for (Map.Entry<ObjectIdentifier, Integer> entry : mapaDispositivo.entrySet()) {
-                    ObjectIdentifier oid = entry.getKey();
-                    int direccionModbus = entry.getValue();
-                    try {
-                        Encodable valor = RequestUtils.readProperty(localDevice, dispositivo, oid, PropertyIdentifier.presentValue, null);
-                        int valorInt = 0;
-                        if (valor instanceof Real) {
-                            valorInt = Math.round(((Real) valor).floatValue());
-                        } else if (valor instanceof Boolean) {
-                            valorInt = ((Boolean) valor).booleanValue() ? 1 : 0;
-                        } else if (valor instanceof BinaryPV) {
-                            valorInt = valor.equals(BinaryPV.active) ? 1 : 0;
-                        } else if (valor instanceof UnsignedInteger) {
-                            valorInt = ((UnsignedInteger) valor).intValue();
-                        } else {
-                            System.err.println("  [BACnet] Tipo no manejado: " + valor.getClass().getSimpleName() + " para " + oid);
-                            continue;
-                        }
-                        actualizarDesdeBACnet(direccionModbus, valorInt);
-                        System.out.println("  [BACnet] Leído " + oid + " = " + valorInt + " → registro " + direccionModbus);
-                    } catch (BACnetException e) {
-                        System.err.println("  [BACnet] Error leyendo " + oid + " del dispositivo " + dispositivo.getInstanceNumber() + ": " + e.getMessage());
-                    }
-                }
+            } catch (Exception e) {
+                System.err.println("Error cacheando dispositivo " + dispositivo.getInstanceNumber() + ": " + e.getMessage());
             }
         }
 
-        public static void escribirEnDispositivo(int direccionModbus, int valor) {
+        public static boolean escribirEnDispositivo(int direccionModbus, int valor) {
             MapeoEscritura m = mapaDireccionAObjeto.get(direccionModbus);
             if (m == null) {
                 System.err.println("  [BACnet] No hay objeto mapeado para dirección Modbus " + direccionModbus);
-                return;
+                return false;
             }
             try {
                 ObjectType tipo = m.oid.getObjectType();
@@ -422,7 +228,7 @@ public class ServidorModbusTest {
                     valorEncodable = new UnsignedInteger(valor);
                 } else {
                     System.err.println("  [BACnet] Tipo de objeto no soportado para escritura: " + tipo);
-                    return;
+                    return false;
                 }
                 WritePropertyRequest request = new WritePropertyRequest(
                         m.oid,
@@ -434,108 +240,82 @@ public class ServidorModbusTest {
                 localDevice.send(m.dispositivo.getAddress(), request);
                 System.out.println("  [BACnet] Escrito en " + m.oid + " valor " + valor + " en dispositivo " + m.dispositivo.getInstanceNumber());
                 Thread.sleep(100);
+                return true;
             } catch (Exception e) {
                 System.err.println("  [BACnet] Error escribiendo en dispositivo: " + e.getMessage());
+                return false;
             }
         }
 
         public static void detener() {
-            running = false;
-            if (monitorThread != null) {
-                monitorThread.interrupt();
-            }
             if (localDevice != null) {
                 localDevice.terminate();
             }
         }
+    }
 
-        private static String obtenerIpLocal() {
-            try {
-                Enumeration<java.net.NetworkInterface> interfaces = java.net.NetworkInterface.getNetworkInterfaces();
-                while (interfaces.hasMoreElements()) {
-                    java.net.NetworkInterface net = interfaces.nextElement();
-                    if (net.isUp() && !net.isLoopback() && !net.isVirtual() && !net.isPointToPoint()) {
-                        Enumeration<java.net.InetAddress> addresses = net.getInetAddresses();
-                        while (addresses.hasMoreElements()) {
-                            java.net.InetAddress addr = addresses.nextElement();
-                            if (addr instanceof java.net.Inet4Address && !addr.isLinkLocalAddress()) {
-                                return addr.getHostAddress();
-                            }
-                        }
-                    }
-                }
-            } catch (Exception ignored) { }
-            return "0.0.0.0";
+    // ==================== CLASE AUXILIAR PARA MAPEO DE OBJETOS ====================
+    static class BacnetObjectMapping {
+        ObjectType type;
+        int instance;
+        int variableIndex;
+
+        BacnetObjectMapping(ObjectType type, int instance, int variableIndex) {
+            this.type = type;
+            this.instance = instance;
+            this.variableIndex = variableIndex;
+        }
+    }
+
+    static class MapeoDispositivo {
+        int deviceId;
+        int base;
+        List<BacnetObjectMapping> objetos;
+        boolean esEscritura;
+        MapeoDispositivo(int deviceId, int base, List<BacnetObjectMapping> objetos, boolean esEscritura) {
+            this.deviceId = deviceId;
+            this.base = base;
+            this.objetos = objetos;
+            this.esEscritura = esEscritura;
         }
     }
 
     // ==================== MÉTODOS AUXILIARES ====================
-    private static void mostrarConfiguracion() {
-        System.out.println("==========================================");
-        System.out.println("  GATEWAY BACnet → Modbus");
-        System.out.println("==========================================");
-        System.out.println("Configuración Modbus:");
-        System.out.println("  • Puerto: " + PUERTO_MODBUS);
-        System.out.println("  • Unit ID: " + UNIT_ID);
-        System.out.println("  • Outdoor Units: " + NUM_OUTDOOR);
-        System.out.println("  • Registros por OU: " + REGISTROS_POR_OU);
-        System.out.println("  • Variables propias OU: " + VARS_PROPIAS_OU);
-        System.out.println("  • Variables por Indoor: " + VARS_POR_INDOOR);
-        System.out.println("  • Máx Indoor por OU: " + MAX_INDOOR_POR_OU);
-        System.out.println("  • Rango total: 0 - " + (NUM_OUTDOOR * REGISTROS_POR_OU - 1));
-        System.out.println("Configuración BACnet:");
-        System.out.println("  • Puerto cliente: " + PUERTO_BACNET_CLIENTE);
-        System.out.println("  • ID dispositivo local: " + ID_DISPOSITIVO_BACNET);
-        System.out.println("  • Tiempo descubrimiento: " + TIEMPO_ESPERA_DESCUBRIMIENTO/1000 + " s");
-        System.out.println("  • Intervalo lectura: " + INTERVALO_LECTURA_BACNET/1000 + " s");
-        System.out.println("------------------------------------------");
-        mostrarResumenPermisos();
-        System.out.println("Mapeo de objetos BACnet:");
-        for (BacnetObjectMapping m : MAPEO_OBJETOS) {
-            System.out.println("  • " + m.type + ":" + m.instance + " → índice " + m.variableIndex);
+    private static ObjectType tipoBacnetDesdeString(String nombre) {
+        switch (nombre) {
+            case "binaryInput": return ObjectType.binaryInput;
+            case "binaryValue": return ObjectType.binaryValue;
+            case "analogInput": return ObjectType.analogInput;
+            case "analogValue": return ObjectType.analogValue;
+            case "multiStateValue": return ObjectType.multiStateValue;
+            case "multiStateInput": return ObjectType.multiStateInput;
+            default: return null;
         }
-        System.out.println("------------------------------------------");
     }
 
-    private static void mostrarResumenPermisos() {
-        System.out.println("Permisos por variable:");
-        System.out.print("  Propias OU: ");
-        for (int i = 0; i < VARS_PROPIAS_OU; i++) {
-            System.out.print((i > 0 ? ", " : "") + (PERMISOS_PROPIAS_OU[i] ? "RO" : "RW"));
+    private static List<BacnetObjectMapping> convertirVarsToMapping(List<GatewayGUI.VariableConfig> vars) {
+        List<BacnetObjectMapping> mapeos = new ArrayList<>();
+        for (int i = 0; i < vars.size(); i++) {
+            GatewayGUI.VariableConfig vc = vars.get(i);
+            ObjectType tipo = tipoBacnetDesdeString(vc.tipo);
+            if (tipo != null) {
+                mapeos.add(new BacnetObjectMapping(tipo, vc.instance, i));
+            }
         }
-        System.out.println();
-        System.out.print("  Indoor:      ");
-        for (int i = 0; i < VARS_POR_INDOOR; i++) {
-            System.out.print((i > 0 ? ", " : "") + (PERMISOS_INDOOR[i] ? "RO" : "RW"));
-        }
-        System.out.println();
+        return mapeos;
     }
 
-    private static void generarRegistros() {
-        registros.clear();
-        String[] varsPropias = new String[VARS_PROPIAS_OU];
-        String[] varsIndoor = new String[VARS_POR_INDOOR];
-        for (int i = 0; i < VARS_PROPIAS_OU; i++) varsPropias[i] = "Propia" + i;
-        for (int i = 0; i < VARS_POR_INDOOR; i++) varsIndoor[i] = "Var" + i;
-
-        for (int ou = 1; ou <= NUM_OUTDOOR; ou++) {
-            int base = (ou - 1) * REGISTROS_POR_OU;
-            int offset = 0;
-            // Variables propias de la OU (10 registros)
-            for (int v = 0; v < VARS_PROPIAS_OU; v++) {
-                int dir = base + offset++;
-                String nombre = "OU" + ou + " " + varsPropias[v];
-                registros.put(dir, new RegistroControlado(dir, nombre, PERMISOS_PROPIAS_OU[v], 0));
-            }
-            // Indoor Units (hasta MAX_INDOOR_POR_OU, cada una con VARS_POR_INDOOR registros)
-            for (int iu = 1; iu <= MAX_INDOOR_POR_OU; iu++) {
-                for (int v = 0; v < VARS_POR_INDOOR; v++) {
-                    int dir = base + offset++;
-                    String nombre = "OU" + ou + " IU" + iu + " " + varsIndoor[v];
-                    registros.put(dir, new RegistroControlado(dir, nombre, PERMISOS_INDOOR[v], 0));
-                }
-            }
+    private static int convertirValorABacnet(Encodable valor) {
+        if (valor instanceof Real) {
+            return Math.round(((Real) valor).floatValue());
+        } else if (valor instanceof Boolean) {
+            return ((Boolean) valor).booleanValue() ? 1 : 0;
+        } else if (valor instanceof BinaryPV) {
+            return valor.equals(BinaryPV.active) ? 1 : 0;
+        } else if (valor instanceof UnsignedInteger) {
+            return ((UnsignedInteger) valor).intValue();
         }
+        return 0;
     }
 
     // ==================== API PARA BACNET ====================
@@ -543,10 +323,11 @@ public class ServidorModbusTest {
         synchronized (registros) {
             RegistroControlado r = registros.get(direccion);
             if (r != null) {
+                int anterior = r.valor;
                 r.valor = nuevoValor;
-                System.out.println("  [BACnet] Registro " + direccion + " = " + nuevoValor);
+                System.out.println("  [BACnet] Registro " + direccion + " = " + nuevoValor + " (antes: " + anterior + ", nombre: " + r.getNombre() + ")");
             } else {
-                System.err.println("  [BACnet] Direccion " + direccion + " no existe");
+                System.err.println("  [BACnet] Dirección " + direccion + " no existe");
             }
         }
     }
@@ -579,131 +360,135 @@ public class ServidorModbusTest {
         System.out.println("Servidor detenido por GUI.");
     }
 
-    public static void ejecutarServidor(int puerto, int puertoBacnet, int idLocal, 
-            List<GatewayGUI.ConfigOU> listaOU, List<GatewayGUI.VariableConfig> listaVars) throws Exception {
+    // ==================== MÉTODO PRINCIPAL DEL SERVIDOR ====================
+    // AHORA RECIBE LOS PARÁMETROS DE TIEMPOS DESDE LA GUI
+    public static void ejecutarServidor(int puerto, int puertoBacnet, int idLocal,
+            List<GatewayGUI.ConfigBloqueOU> listaBloques,
+            GatewayGUI.VariableDefinitions varDefs,
+            String ipLocal,
+            int tiempoDescubrimientoMs,      // nuevo
+            int intervaloLecturaMs) throws Exception {  // nuevo
         
         System.out.println("==========================================");
-        System.out.println("  GATEWAY BACnet → Modbus (GUI)");
+        System.out.println("  GATEWAY BACnet → Modbus (GUI) - Variables globales");
         System.out.println("==========================================");
-        
-        int numOU = listaOU.size();
-        int registrosPorOU = 400;
-        
-        System.out.println("Puerto Modbus: " + puerto);
-        System.out.println("Puerto BACnet: " + puertoBacnet);
-        System.out.println("Outdoor Units: " + numOU);
-        System.out.println("Registros por OU: " + registrosPorOU);
-        System.out.println("Variables configuradas: " + listaVars.size());
         
         registros.clear();
+        BACnetClienteIntegrado.reiniciarCaches();
         
-        int ouIndex = 0;
-        for (GatewayGUI.ConfigOU config : listaOU) {
-            int base = ouIndex * registrosPorOU;
+        List<MapeoDispositivo> mapeosLectura = new ArrayList<>();
+        List<MapeoDispositivo> mapeosEscritura = new ArrayList<>();
+        List<Integer> listaIdIUs = new ArrayList<>();
+        
+        int offsetGlobal = 0;
+        
+        for (GatewayGUI.ConfigBloqueOU bloque : listaBloques) {
+            int cantidadIU = bloque.getCantidadIU();
+            int tamLectura = 6 + cantidadIU * 2;
+            int baseLectura = offsetGlobal;
             
-            for (int i = 0; i < 10; i++) {
-                int dir = base + i;
-                String nombre = "OU-" + config.idOU + " " + getNombreVariable(i);
-                registros.put(dir, new RegistroControlado(dir, nombre, false, 0));
+            // Variables propias de OU
+            for (int i = 0; i < 6; i++) {
+                GatewayGUI.VariableConfig var = varDefs.ouVars.get(i);
+                int dir = baseLectura + i;
+                String nombre = "OU-" + bloque.idOU + " " + var.tipo + ":" + var.instance;
+                boolean soloLectura = var.tipo.endsWith("Input");
+                registros.put(dir, new RegistroControlado(dir, nombre, soloLectura, 0));
             }
+            mapeosLectura.add(new MapeoDispositivo(bloque.idOU, baseLectura, convertirVarsToMapping(varDefs.ouVars), false));
             
-            int cantidadIU = config.idIUFin - config.idIUInicio + 1;
-            for (int idxIU = 0; idxIU < cantidadIU; idxIU++) {
-                int deviceIdIU = config.idIUInicio + idxIU;
-                for (int i = 0; i < 20; i++) {
-                    int dir = base + 10 + idxIU * 20 + i;
-                    String nombre = "IU-" + deviceIdIU + " " + getNombreVariable(i);
-                    registros.put(dir, new RegistroControlado(dir, nombre, false, 0));
+            // Lectura por IU
+            int baseLecturaIU = baseLectura + 6;
+            for (int iuIdx = 0; iuIdx < cantidadIU; iuIdx++) {
+                int idIU = bloque.idIUInicio + iuIdx;
+                listaIdIUs.add(idIU);
+                for (int j = 0; j < 2; j++) {
+                    GatewayGUI.VariableConfig var = varDefs.iuReadVars.get(j);
+                    int dir = baseLecturaIU + iuIdx*2 + j;
+                    String nombre = "IU-" + idIU + " " + var.tipo + ":" + var.instance;
+                    boolean soloLectura = var.tipo.endsWith("Input");
+                    registros.put(dir, new RegistroControlado(dir, nombre, soloLectura, 0));
                 }
+                mapeosLectura.add(new MapeoDispositivo(idIU, baseLecturaIU + iuIdx*2, convertirVarsToMapping(varDefs.iuReadVars), false));
             }
-            
-            System.out.println("OU-" + config.idOU + " mapeada a base " + base + " con IUs " + config.idIUInicio + "-" + config.idIUFin);
-            ouIndex++;
+            offsetGlobal += tamLectura;
         }
         
+        // Bloque de escritura
+        int baseEscrituraGlobal = offsetGlobal;
+        int iuGlobal = 0;
+        for (GatewayGUI.ConfigBloqueOU bloque : listaBloques) {
+            int cantidadIU = bloque.getCantidadIU();
+            for (int iuIdx = 0; iuIdx < cantidadIU; iuIdx++) {
+                int idIU = listaIdIUs.get(iuGlobal);
+                int baseIUescritura = baseEscrituraGlobal + iuGlobal * 2;
+                for (int j = 0; j < 2; j++) {
+                    GatewayGUI.VariableConfig var = varDefs.iuWriteVars.get(j);
+                    int dir = baseIUescritura + j;
+                    String nombre = "IU-" + idIU + " " + var.tipo + ":" + var.instance;
+                    registros.put(dir, new RegistroControlado(dir, nombre, false, 0));
+                }
+                mapeosEscritura.add(new MapeoDispositivo(idIU, baseIUescritura, convertirVarsToMapping(varDefs.iuWriteVars), true));
+                iuGlobal++;
+            }
+        }
+        
+        // Configurar servidor Modbus
         MapeoProcessImage processImage = new MapeoProcessImage();
         ModbusCoupler.getReference().setProcessImage(processImage);
-        ModbusCoupler.getReference().setUnitID(1);
-
+        ModbusCoupler.getReference().setUnitID(UNIT_ID);
+        
         ModbusTCPListener listener = new ModbusTCPListener(10);
         listener.setAddress(InetAddress.getByName("0.0.0.0"));
         listener.setPort(puerto);
         listener.start();
         System.out.println("Servidor Modbus activo en puerto " + puerto);
-
-        final int finalPuertoBacnet = puertoBacnet;
-        final int finalIdLocal = idLocal;
-        final List<GatewayGUI.ConfigOU> finalListaOU = listaOU;
-        final List<GatewayGUI.VariableConfig> finalListaVars = listaVars;
-
+        
+        // Iniciar cliente BACnet en hilo separado, pasando los tiempos
+        final int tiempoDescubrimiento = tiempoDescubrimientoMs;
+        final int intervaloLectura = intervaloLecturaMs;
         new Thread(() -> {
             try {
-                iniciarClienteBACnetGUI(finalPuertoBacnet, finalIdLocal, finalListaOU, finalListaVars);
+                iniciarClienteBACnetGUI(puertoBacnet, idLocal, mapeosLectura, mapeosEscritura, ipLocal,
+                                        tiempoDescubrimiento, intervaloLectura);
             } catch (Exception e) {
                 System.err.println("Error BACnet: " + e.getMessage());
                 e.printStackTrace();
             }
         }).start();
-
+        
+        // Heartbeat
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("HH:mm:ss");
         while (!Thread.currentThread().isInterrupted()) {
-            Thread.sleep(5000);
-            String hora = LocalTime.now().format(formatter);
-            System.out.println("[" + hora + "] Heartbeat");
+            Thread.sleep(INTERVALO_HEARTBEAT);
+            System.out.println("[" + LocalTime.now().format(formatter) + "] Heartbeat");
         }
     }
 
-    private static String obtenerIpLocalStatic() {
-        try {
-            Enumeration<java.net.NetworkInterface> interfaces = java.net.NetworkInterface.getNetworkInterfaces();
-            while (interfaces.hasMoreElements()) {
-                java.net.NetworkInterface net = interfaces.nextElement();
-                if (net.isUp() && !net.isLoopback() && !net.isVirtual() && !net.isPointToPoint()) {
-                    Enumeration<java.net.InetAddress> addresses = net.getInetAddresses();
-                    while (addresses.hasMoreElements()) {
-                        java.net.InetAddress addr = addresses.nextElement();
-                        if (addr instanceof java.net.Inet4Address && !addr.isLinkLocalAddress()) {
-                            return addr.getHostAddress();
-                        }
-                    }
-                }
-            }
-        } catch (Exception ignored) { }
-        return "0.0.0.0";
-    }
-
-    private static ObjectType tipoBacnetDesdeString(String nombre) {
-        switch (nombre) {
-            case "binaryInput": return ObjectType.binaryInput;
-            case "binaryValue": return ObjectType.binaryValue;
-            case "analogInput": return ObjectType.analogInput;
-            case "analogValue": return ObjectType.analogValue;
-            case "multiStateValue": return ObjectType.multiStateValue;
-            default: return null;
-        }
-    }
-
-    private static void iniciarClienteBACnetGUI(int puertoBacnet, int idLocal, 
-            List<GatewayGUI.ConfigOU> listaOU, List<GatewayGUI.VariableConfig> listaVars) throws Exception {
+    // ==================== CLIENTE BACNET (DESCUBRIMIENTO Y LECTURA) ====================
+    // RECIBE LOS TIEMPOS COMO PARÁMETROS
+    private static void iniciarClienteBACnetGUI(int puertoBacnet, int idLocal,
+            List<MapeoDispositivo> mapeosLectura, List<MapeoDispositivo> mapeosEscritura,
+            String ipLocal, int tiempoDescubrimientoMs, int intervaloLecturaMs) throws Exception {
         
-        String ipLocal = obtenerIpLocalStatic();
-        String broadcast = ipLocal.substring(0, ipLocal.lastIndexOf('.')) + ".255";
-
+        String broadcast = obtenerBroadcastDesdeIp(ipLocal);
         System.out.println("IP local: " + ipLocal);
         System.out.println("Broadcast: " + broadcast);
-
+        
         IpNetwork network = new IpNetworkBuilder()
                 .withLocalBindAddress(ipLocal)
                 .withBroadcast(broadcast, 0)
                 .withPort(puertoBacnet)
                 .build();
-
+        
         DefaultTransport transport = new DefaultTransport(network);
         LocalDevice localDevice = new LocalDevice(idLocal, transport);
         localDevice.initialize();
-
-        final List<RemoteDevice> dispositivos = new CopyOnWriteArrayList<>();
-
+        BACnetClienteIntegrado.localDevice = localDevice;
+        System.out.println("  [DEBUG] BACnetClienteIntegrado.localDevice asignado");
+        
+        List<RemoteDevice> dispositivos = new CopyOnWriteArrayList<>();
+        
         localDevice.getEventHandler().addListener(new DeviceEventListener() {
             @Override
             public void iAmReceived(RemoteDevice rd) {
@@ -722,232 +507,83 @@ public class ServidorModbusTest {
             @Override public void propertyWritten(com.serotonin.bacnet4j.type.constructed.Address address, com.serotonin.bacnet4j.obj.BACnetObject obj, PropertyValue pv) { }
             @Override public void listenerException(Throwable e) { }
         });
-
+        
         localDevice.sendGlobalBroadcast(new WhoIsRequest(null, null));
         System.out.println("Who-Is broadcast enviado.");
-
-        Thread.sleep(10000);
-
+        
+        // Usar el tiempo de descubrimiento recibido
+        Thread.sleep(tiempoDescubrimientoMs);
         System.out.println("I-Am responses recibidas: " + dispositivos.size());
-        for (RemoteDevice d : dispositivos) {
-            System.out.println("  - Device ID: " + d.getInstanceNumber() + " en " + d.getAddress());
-        }
-
-        System.out.println("\n=== Mapeando dispositivos descubiertos ===");
+        
+        // Mapear dispositivos encontrados
         for (RemoteDevice dispositivo : dispositivos) {
             int deviceId = dispositivo.getInstanceNumber();
-            int[] ouIu = obtenerOuIuDesdeDeviceId(deviceId);
-            
-            if (ouIu == null) {
-                System.out.println("Dispositivo " + deviceId + " no reconocido, se ignora.");
-                continue;
+            System.out.println("[DEBUG] Procesando dispositivo BACnet instance: " + deviceId);
+            MapeoDispositivo mp = mapeosLectura.stream().filter(m -> m.deviceId == deviceId).findFirst().orElse(null);
+            if (mp != null) {
+                System.out.println("[DEBUG] -> Coincide con mapeo LECTURA, base=" + mp.base + ", deviceId=" + mp.deviceId);
+                BACnetClienteIntegrado.cachearDispositivo(localDevice, dispositivo, mp.base, mp.objetos);
             }
-            
-            int ou = ouIu[0];
-            int iu = iu = ouIu[1];
-            
-            int base;
-            if (iu == 0) {
-                base = (ou - 1) * 400;
-            } else {
-                base = (ou - 1) * 400 + 10 + (iu - 1) * 20;
+            mp = mapeosEscritura.stream().filter(m -> m.deviceId == deviceId).findFirst().orElse(null);
+            if (mp != null) {
+                System.out.println("[DEBUG] -> Coincide con mapeo ESCRITURA, base=" + mp.base + ", deviceId=" + mp.deviceId);
+                BACnetClienteIntegrado.cachearDispositivo(localDevice, dispositivo, mp.base, mp.objetos);
             }
-            
-            System.out.println("Dispositivo " + deviceId + " -> OU" + ou + ", IU" + iu + ", base=" + base);
-            cachearDispositivo(localDevice, dispositivo, base, listaVars);
-        }
-
-        System.out.println("\n=== Iniciando lectura continua ===");
-        while (true) {
-            Thread.sleep(10000);
-            leerTodosLosDispositivosGUI(localDevice, dispositivos, listaVars);
-        }
-    }
-
-    private static int[] obtenerOuIuDesdeDeviceId(int deviceId) {
-        if (deviceId >= 50000 && deviceId <= 50007) {
-            return new int[]{1, deviceId - 50000 + 1};
-        } else if (deviceId >= 51001 && deviceId <= 51009) {
-            return new int[]{2, deviceId - 51000};
-        } else if (deviceId >= 52001 && deviceId <= 52015) {
-            return new int[]{3, deviceId - 52000};
-        } else if (deviceId >= 53001 && deviceId <= 53009) {
-            return new int[]{4, deviceId - 53000};
-        } else if (deviceId == 50100) {
-            return new int[]{1, 0};
-        } else if (deviceId == 51112) {
-            return new int[]{2, 0};
-        } else if (deviceId == 52120) {
-            return new int[]{3, 0};
-        } else if (deviceId == 53124) {
-            return new int[]{4, 0};
-        }
-        return null;
-    }
-
-    private static void mapearDispositivo(LocalDevice localDevice, RemoteDevice dispositivo, int base, List<GatewayGUI.VariableConfig> listaVars) {
-        try {
-            DiscoveryUtils.getExtendedDeviceInformation(localDevice, dispositivo);
-            Encodable encodable = RequestUtils.readProperty(localDevice, dispositivo, dispositivo.getObjectIdentifier(), PropertyIdentifier.objectList, null);
-            
-            if (encodable instanceof com.serotonin.bacnet4j.type.constructed.SequenceOf) {
-                com.serotonin.bacnet4j.type.constructed.SequenceOf<ObjectIdentifier> objectList = 
-                    (com.serotonin.bacnet4j.type.constructed.SequenceOf<ObjectIdentifier>) encodable;
-
-                for (ObjectIdentifier oid : objectList) {
-                    for (GatewayGUI.VariableConfig var : listaVars) {
-                        ObjectType tipo = tipoBacnetDesdeString(var.tipo);
-                        if (tipo != null && oid.getObjectType().equals(tipo) && oid.getInstanceNumber() == var.instance) {
-                            int direccion = base + var.index;
-                            System.out.println("  [MAPEO] " + oid + " → reg " + direccion);
-                            break;
-                        }
-                    }
-                }
-            }
-        } catch (Exception e) {
-            System.err.println("Error mapeando dispositivo " + dispositivo.getInstanceNumber() + ": " + e.getMessage());
-        }
-    }
-
-    private static final Map<RemoteDevice, com.serotonin.bacnet4j.type.constructed.SequenceOf<ObjectIdentifier>> cacheObjectList = new ConcurrentHashMap<>();
-    private static final Map<RemoteDevice, Integer> cacheDeviceToBase = new ConcurrentHashMap<>();
-    private static final Map<RemoteDevice, List<ObjectIdentifier>> cacheDeviceToOids = new ConcurrentHashMap<>();
-
-    private static void cachearDispositivo(LocalDevice localDevice, RemoteDevice dispositivo, int base, List<GatewayGUI.VariableConfig> listaVars) {
-        try {
-            DiscoveryUtils.getExtendedDeviceInformation(localDevice, dispositivo);
-            Encodable encodable = RequestUtils.readProperty(localDevice, dispositivo, dispositivo.getObjectIdentifier(), PropertyIdentifier.objectList, null);
-            
-            if (encodable instanceof com.serotonin.bacnet4j.type.constructed.SequenceOf) {
-                com.serotonin.bacnet4j.type.constructed.SequenceOf<ObjectIdentifier> objectList = 
-                    (com.serotonin.bacnet4j.type.constructed.SequenceOf<ObjectIdentifier>) encodable;
-
-                cacheObjectList.put(dispositivo, objectList);
-                cacheDeviceToBase.put(dispositivo, base);
-                
-                List<ObjectIdentifier> oidsRelevantes = new ArrayList<>();
-                for (ObjectIdentifier oid : objectList) {
-                    for (GatewayGUI.VariableConfig var : listaVars) {
-                        ObjectType tipo = tipoBacnetDesdeString(var.tipo);
-                        if (tipo != null && oid.getObjectType().equals(tipo) && oid.getInstanceNumber() == var.instance) {
-                            int direccion = base + var.index;
-                            System.out.println("  [CACHE] " + oid + " → reg " + direccion);
-                            oidsRelevantes.add(oid);
-                            break;
-                        }
-                    }
-                }
-                cacheDeviceToOids.put(dispositivo, oidsRelevantes);
-                System.out.println("  [CACHE] Dispositivo " + dispositivo.getInstanceNumber() + " cacheado con " + oidsRelevantes.size() + " objetos relevantes");
-            }
-        } catch (Exception e) {
-            System.err.println("Error cacheando dispositivo " + dispositivo.getInstanceNumber() + ": " + e.getMessage());
-        }
-    }
-
-    private static void leerTodosLosDispositivosOptimizado(LocalDevice localDevice, List<GatewayGUI.VariableConfig> listaVars) {
-        for (RemoteDevice dispositivo : cacheDeviceToBase.keySet()) {
-            Integer base = cacheDeviceToBase.get(dispositivo);
-            List<ObjectIdentifier> oids = cacheDeviceToOids.get(dispositivo);
-            if (base == null || oids == null || oids.isEmpty()) continue;
-            
-            try {
-                for (ObjectIdentifier oid : oids) {
-                    for (GatewayGUI.VariableConfig var : listaVars) {
-                        ObjectType tipo = tipoBacnetDesdeString(var.tipo);
-                        if (tipo != null && oid.getObjectType().equals(tipo) && oid.getInstanceNumber() == var.instance) {
-                            int direccion = base + var.index;
-                            try {
-                                Encodable valor = RequestUtils.readProperty(localDevice, dispositivo, oid, PropertyIdentifier.presentValue, null);
-                                int valorInt = convertirValorABacnet(valor);
-                                actualizarDesdeBACnet(direccion, valorInt);
-                            } catch (BACnetException e) {
-                                System.err.println("  [BACnet] Error leyendo " + oid + ": " + e.getMessage());
-                            }
-                            break;
-                        }
-                    }
-                }
-            } catch (Exception e) {
-                System.err.println("Error en lectura optimizada dispositivo " + dispositivo.getInstanceNumber() + ": " + e.getMessage());
+            if (mp == null && mapeosLectura.stream().noneMatch(m -> m.deviceId == deviceId)) {
+                System.out.println("Dispositivo " + deviceId + " no coincide con ningún mapeo, se ignora.");
             }
         }
-    }
-
-    private static int convertirValorABacnet(Encodable valor) {
-        if (valor instanceof Real) {
-            return Math.round(((Real) valor).floatValue());
-        } else if (valor instanceof Boolean) {
-            return ((Boolean) valor).booleanValue() ? 1 : 0;
-        } else if (valor instanceof BinaryPV) {
-            return valor.equals(BinaryPV.active) ? 1 : 0;
-        } else if (valor instanceof UnsignedInteger) {
-            return ((UnsignedInteger) valor).intValue();
-        }
-        return 0;
-    }
-
-    private static void leerTodosLosDispositivosRPM(LocalDevice localDevice, List<GatewayGUI.VariableConfig> listaVars) {
-        for (RemoteDevice dispositivo : cacheDeviceToBase.keySet()) {
-            Integer base = cacheDeviceToBase.get(dispositivo);
-            List<ObjectIdentifier> oids = cacheDeviceToOids.get(dispositivo);
-            if (base == null || oids == null || oids.isEmpty()) continue;
-            
-            try {
-                for (ObjectIdentifier oid : oids) {
-                    for (GatewayGUI.VariableConfig var : listaVars) {
-                        ObjectType tipo = tipoBacnetDesdeString(var.tipo);
-                        if (tipo != null && oid.getObjectType().equals(tipo) && oid.getInstanceNumber() == var.instance) {
-                            int direccion = base + var.index;
-                            try {
-                                Encodable valor = RequestUtils.readProperty(localDevice, dispositivo, oid, PropertyIdentifier.presentValue, null);
-                                int valorInt = convertirValorABacnet(valor);
-                                actualizarDesdeBACnet(direccion, valorInt);
-                            } catch (BACnetException e) {
-                                System.err.println("  [BACnet] Error leyendo " + oid + ": " + e.getMessage());
-                            }
-                            break;
-                        }
-                    }
-                }
-            } catch (Exception e) {
-                System.err.println("Error en lectura optimizada dispositivo " + dispositivo.getInstanceNumber() + ": " + e.getMessage());
-            }
-        }
-    }
-
-    private static void leerTodosLosDispositivosGUI(LocalDevice localDevice, List<RemoteDevice> dispositivos, 
-            List<GatewayGUI.VariableConfig> listaVars) {
         
-        for (RemoteDevice dispositivo : cacheDeviceToBase.keySet()) {
-            Integer base = cacheDeviceToBase.get(dispositivo);
-            List<ObjectIdentifier> oids = cacheDeviceToOids.get(dispositivo);
-            if (base == null || oids == null || oids.isEmpty()) continue;
+        System.out.println("[DEBUG] Mapa de direcciones a objeto para ESCRITURA:");
+        for (Integer dir : BACnetClienteIntegrado.mapaDireccionAObjeto.keySet()) {
+            System.out.println("  Reg " + dir + " -> " + BACnetClienteIntegrado.mapaDireccionAObjeto.get(dir).oid);
+        }
+        
+        // Bucle de lectura continua con el intervalo configurable
+        Map<String, Integer> contadorErroresLectura = new ConcurrentHashMap<>();
+        while (true) {
+            Thread.sleep(intervaloLecturaMs);
+            leerTodosLosDispositivosGUI(localDevice, contadorErroresLectura);
+        }
+    }
+    
+    private static void leerTodosLosDispositivosGUI(LocalDevice localDevice,
+            Map<String, Integer> contadorErroresLectura) {
+        System.out.println("  [DEBUG] Leyendo dispositivos cacheados. Total: " + BACnetClienteIntegrado.cacheDeviceToBase.size());
+        
+        // Obtener lista de IDs en orden para debug
+        List<Integer> deviceIds = new ArrayList<>();
+        for (RemoteDevice d : BACnetClienteIntegrado.cacheDeviceToBase.keySet()) {
+            deviceIds.add(d.getInstanceNumber());
+        }
+        System.out.println("  [DEBUG] Orden de lectura de dispositivos: " + deviceIds);
+        
+        for (RemoteDevice dispositivo : BACnetClienteIntegrado.cacheDeviceToBase.keySet()) {
+            List<ObjectIdentifier> oids = BACnetClienteIntegrado.cacheDeviceToOids.get(dispositivo);
+            List<Integer> direcciones = BACnetClienteIntegrado.cacheDeviceToAddresses.get(dispositivo);
+            if (oids == null || oids.isEmpty() || direcciones == null) continue;
+            
+            System.out.println("  [DEBUG] Leyendo dispositivo " + dispositivo.getInstanceNumber() + ", OIDs: " + oids.size() + ", direcciones: " + direcciones);
             
             try {
-                for (ObjectIdentifier oid : oids) {
-                    for (GatewayGUI.VariableConfig var : listaVars) {
-                        ObjectType tipo = tipoBacnetDesdeString(var.tipo);
-                        if (tipo != null && oid.getObjectType().equals(tipo) && oid.getInstanceNumber() == var.instance) {
-                            int direccion = base + var.index;
-                            try {
-                                Encodable valor = RequestUtils.readProperty(localDevice, dispositivo, oid, PropertyIdentifier.presentValue, null);
-                                int valorInt = 0;
-                                if (valor instanceof Real) {
-                                    valorInt = Math.round(((Real) valor).floatValue());
-                                } else if (valor instanceof Boolean) {
-                                    valorInt = ((Boolean) valor).booleanValue() ? 1 : 0;
-                                } else if (valor instanceof BinaryPV) {
-                                    valorInt = valor.equals(BinaryPV.active) ? 1 : 0;
-                                } else if (valor instanceof UnsignedInteger) {
-                                    valorInt = ((UnsignedInteger) valor).intValue();
-                                }
-                                actualizarDesdeBACnet(direccion, valorInt);
-                            } catch (BACnetException e) {
-                                System.err.println("Error leyendo " + oid + ": " + e.getMessage());
-                            }
-                            break;
+                for (int i = 0; i < oids.size(); i++) {
+                    ObjectIdentifier oid = oids.get(i);
+                    Integer direccion = direcciones.get(i);
+                    if (direccion == null) continue;
+                    String clave = dispositivo.getInstanceNumber() + "_" + oid.toString();
+                    try {
+                        Encodable valor = RequestUtils.readProperty(localDevice, dispositivo, oid, PropertyIdentifier.presentValue, null);
+                        int valorInt = convertirValorABacnet(valor);
+                        actualizarDesdeBACnet(direccion, valorInt);
+                        contadorErroresLectura.remove(clave);
+                    } catch (BACnetException e) {
+                        int errores = contadorErroresLectura.getOrDefault(clave, 0) + 1;
+                        contadorErroresLectura.put(clave, errores);
+                        if (errores == 3) {
+                            System.err.println("  [AVISO] Objeto " + oid + " del dispositivo " + dispositivo.getInstanceNumber() +
+                                " lleva 3 lecturas fallidas consecutivas. Verifique la configuración o conectividad.");
+                        } else if (errores > 3 && errores % 10 == 0) {
+                            System.err.println("  [AVISO] Objeto " + oid + " continúa fallando (" + errores + " intentos fallidos).");
                         }
                     }
                 }
@@ -956,43 +592,25 @@ public class ServidorModbusTest {
             }
         }
     }
-
-    private static void leerObjetosDelista(LocalDevice localDevice, RemoteDevice dispositivo, 
-            com.serotonin.bacnet4j.type.constructed.SequenceOf<ObjectIdentifier> objectList, 
-            int base, List<GatewayGUI.VariableConfig> listaVars) {
-        
-        System.out.println("  Leyendo objetos del dispositivo " + dispositivo.getInstanceNumber() + " (base=" + base + ")");
-        int leidos = 0;
-        
-        for (ObjectIdentifier oid : objectList) {
-            for (GatewayGUI.VariableConfig var : listaVars) {
-                ObjectType tipo = tipoBacnetDesdeString(var.tipo);
-                if (tipo != null && oid.getObjectType().equals(tipo) && oid.getInstanceNumber() == var.instance) {
-                    int direccion = base + var.index;
-                    try {
-                        Encodable valor = RequestUtils.readProperty(localDevice, dispositivo, oid, PropertyIdentifier.presentValue, null);
-                        int valorInt = 0;
-                        if (valor instanceof Real) {
-                            valorInt = Math.round(((Real) valor).floatValue());
-                        } else if (valor instanceof Boolean) {
-                            valorInt = ((Boolean) valor).booleanValue() ? 1 : 0;
-                        } else if (valor instanceof BinaryPV) {
-                            valorInt = valor.equals(BinaryPV.active) ? 1 : 0;
-                        } else if (valor instanceof UnsignedInteger) {
-                            valorInt = ((UnsignedInteger) valor).intValue();
-                        }
-                        actualizarDesdeBACnet(direccion, valorInt);
-                        leidos++;
-                    } catch (Exception e) {
-                        System.err.println("    Error leyendo " + oid + ": " + e.getMessage());
+    
+    // ==================== OBTENCIÓN DE BROADCAST REAL ====================
+    private static String obtenerBroadcastDesdeIp(String ipLocal) throws Exception {
+        Enumeration<NetworkInterface> nets = NetworkInterface.getNetworkInterfaces();
+        while (nets.hasMoreElements()) {
+            NetworkInterface net = nets.nextElement();
+            for (InterfaceAddress addr : net.getInterfaceAddresses()) {
+                InetAddress inet = addr.getAddress();
+                if (inet instanceof Inet4Address && inet.getHostAddress().equals(ipLocal)) {
+                    InetAddress broadcast = addr.getBroadcast();
+                    if (broadcast != null) {
+                        return broadcast.getHostAddress();
                     }
-                    break;
                 }
             }
         }
-        System.out.println("  Leidos " + leidos + " valores del dispositivo " + dispositivo.getInstanceNumber());
+        throw new Exception("No se pudo obtener el broadcast para la IP " + ipLocal);
     }
-
+    
     // ==================== MAIN ====================
     public static void main(String[] args) {
         SwingUtilities.invokeLater(() -> new GatewayGUI());

@@ -1,0 +1,15 @@
+# Configuración de variables globales
+# Formato: tipo,instancia
+# OU variables (6)
+multiStateInput,1
+binaryInput,1
+analogInput,1
+analogInput,2
+analogInput,3
+analogInput,8
+# IU Read variables (2)
+analogInput,1
+analogInput,7
+# IU Write variables (2)
+binaryValue,1
+analogValue,1
